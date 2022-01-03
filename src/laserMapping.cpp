@@ -138,6 +138,8 @@ geometry_msgs::PoseStamped msg_body_pose;
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
 
+double gyr_scale = 1.0;
+
 void SigHandle(int sig)
 {
     flg_exit = true;
@@ -355,6 +357,10 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 
     last_timestamp_imu = timestamp;
 
+    msg->angular_velocity.x *= gyr_scale;
+    msg->angular_velocity.y *= gyr_scale;
+    msg->angular_velocity.z *= gyr_scale;
+
     imu_buffer.push_back(msg);
     mtx_buffer.unlock();
     sig_buffer.notify_all();
@@ -388,7 +394,6 @@ bool sync_packages(MeasureGroup &meas)
             lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);
             lidar_mean_scantime += (meas.lidar->points.back().curvature / double(1000) - lidar_mean_scantime) / scan_num;
         }
-
         meas.lidar_end_time = lidar_end_time;
 
         lidar_pushed = true;
@@ -770,6 +775,7 @@ int main(int argc, char** argv)
     nh.param<double>("mapping/acc_cov",acc_cov,0.1);
     nh.param<double>("mapping/b_gyr_cov",b_gyr_cov,0.0001);
     nh.param<double>("mapping/b_acc_cov",b_acc_cov,0.0001);
+    nh.param<double>("mapping/gyr_scale",gyr_scale,1);
     nh.param<double>("preprocess/blind", p_pre->blind, 0.01);
     nh.param<int>("preprocess/lidar_type", p_pre->lidar_type, AVIA);
     nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);
@@ -925,8 +931,8 @@ int main(int argc, char** argv)
             feats_down_world->resize(feats_down_size);
 
             V3D ext_euler = SO3ToEuler(state_point.offset_R_L_I);
-            fout_pre<<setw(20)<<Measures.lidar_beg_time - first_lidar_time<<" "<<euler_cur.transpose()<<" "<< state_point.pos.transpose()<<" "<<ext_euler.transpose() << " "<<state_point.offset_T_L_I.transpose()<< " " << state_point.vel.transpose() \
-            <<" "<<state_point.bg.transpose()<<" "<<state_point.ba.transpose()<<" "<<state_point.grav<< endl;
+            fout_pre<<setw(20)<<Measures.lidar_beg_time - first_lidar_time<<", "<<euler_cur.transpose()<<", "<< state_point.pos.transpose()<<", "<<ext_euler.transpose() << ", "<<state_point.offset_T_L_I.transpose()<< ", " << state_point.vel.transpose() \
+            <<", "<<state_point.bg.transpose()<<", "<<state_point.ba.transpose()<<", "<<state_point.grav<< endl;
 
             if(0) // If you need to see map point, change to "if(1)"
             {
@@ -971,6 +977,10 @@ int main(int argc, char** argv)
             if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body);
             // publish_effect_world(pubLaserCloudEffect);
             // publish_map(pubLaserCloudMap);
+            //
+            ext_euler = SO3ToEuler(state_point.offset_R_L_I);
+            fout_out << setw(20) << Measures.lidar_beg_time - first_lidar_time << ", " << euler_cur.transpose() << ", " << state_point.pos.transpose()<< ", " << ext_euler.transpose() << ", "<<state_point.offset_T_L_I.transpose()<<", "<< state_point.vel.transpose() \
+            <<", "<<state_point.bg.transpose()<<", "<<state_point.ba.transpose()<<", "<<state_point.grav<<", "<<feats_undistort->points.size()<<endl;
 
             /*** Debug variables ***/
             if (runtime_pos_log)
@@ -997,6 +1007,7 @@ int main(int argc, char** argv)
                 time_log_counter ++;
                 printf("[ mapping ]: time: IMU + Map + Input Downsample: %0.6f ave match: %0.6f ave solve: %0.6f  ave ICP: %0.6f  map incre: %0.6f ave total: %0.6f icp: %0.6f construct H: %0.6f \n",t1-t0,aver_time_match,aver_time_solve,t3-t1,t5-t3,aver_time_consu,aver_time_icp, aver_time_const_H_time);
                 ext_euler = SO3ToEuler(state_point.offset_R_L_I);
+                std::cout << "ext_euler = " << ext_euler.transpose() << ", ext_trans = " << state_point.offset_T_L_I.transpose() <<std::endl;
                 fout_out << setw(20) << Measures.lidar_beg_time - first_lidar_time << " " << euler_cur.transpose() << " " << state_point.pos.transpose()<< " " << ext_euler.transpose() << " "<<state_point.offset_T_L_I.transpose()<<" "<< state_point.vel.transpose() \
                 <<" "<<state_point.bg.transpose()<<" "<<state_point.ba.transpose()<<" "<<state_point.grav<<" "<<feats_undistort->points.size()<<endl;
                 dump_lio_state_to_log(fp);
