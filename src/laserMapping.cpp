@@ -71,6 +71,12 @@ double T1[MAXN], s_plot[MAXN], s_plot2[MAXN], s_plot3[MAXN], s_plot4[MAXN], s_pl
 double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 int    kdtree_size_st = 0, kdtree_size_end = 0, add_point_size = 0, kdtree_delete_counter = 0;
 bool   runtime_pos_log = false, pcd_save_en = false, time_sync_en = false, extrinsic_est_en = true, path_en = true;
+
+bool save_odometry = true;
+bool save_pose = true;
+std::string pose_topic;
+std::ofstream out_pose;
+std::ofstream out_odometry;
 /**************************/
 
 float res_last[100000] = {0.0};
@@ -331,6 +337,16 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;
     mtx_buffer.unlock();
     sig_buffer.notify_all();
+}
+
+void pose_cbk(const geometry_msgs::PoseStamped::ConstPtr &pose_msg)
+{
+  const auto& position = pose_msg->pose.position;
+  const auto& orientation = pose_msg->pose.orientation;
+  out_pose << std::setprecision(6) << pose_msg->header.stamp << " " <<
+    position.x << " " << position.y << " " << position.z << " " <<
+    orientation.w << " " << orientation.x << " " << orientation.y << " " <<
+    orientation.z << " " << "\n";
 }
 
 void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in) 
@@ -615,6 +631,15 @@ void publish_odometry(const ros::Publisher & pubOdomAftMapped)
     q.setZ(odomAftMapped.pose.pose.orientation.z);
     transform.setRotation( q );
     br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "camera_init", "body" ) );
+
+    if(save_odometry){
+      const auto& position = odomAftMapped.pose.pose.position;
+      const auto& orientation = odomAftMapped.pose.pose.orientation;
+      out_odometry << std::setprecision(6) << odomAftMapped.header.stamp << " " <<
+        position.x << " " << position.y << " " << position.z << " " <<
+        orientation.w << " " << orientation.x << " " << orientation.y << " " <<
+        orientation.z << " " << "\n";
+    }
 }
 
 void publish_path(const ros::Publisher pubPath)
@@ -789,6 +814,10 @@ int main(int argc, char** argv)
     nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>());
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());
     cout<<"p_pre->lidar_type "<<p_pre->lidar_type<<endl;
+
+    nh.param<string>("calibration/pose_topic", pose_topic, "/gps/pose");
+    nh.param<bool>("calibration/save_pose", save_pose, true);
+    nh.param<bool>("calibration/save_odometry", save_odometry, true);
     
     path.header.stamp    = ros::Time::now();
     path.header.frame_id ="camera_init";
@@ -821,6 +850,16 @@ int main(int argc, char** argv)
     double epsi[23] = {0.001};
     fill(epsi, epsi+23, 0.001);
     kf.init_dyn_share(get_f, df_dx, df_dw, h_share_model, NUM_MAX_ITERATIONS, epsi);
+
+    // calibration record
+    if(save_pose){
+      out_pose.open(root_dir + "/calibration/pose.txt");
+      ros::Subscriber sub_pose = nh.subscribe(pose_topic, 100000, pose_cbk);
+      std::cout << "open pose file" << std::endl;
+    }
+    if(save_odometry){
+      out_odometry.open(root_dir + "/calibration/odometry.txt");
+    }
 
     /*** debug record ***/
     FILE *fp;
@@ -1028,6 +1067,13 @@ int main(int argc, char** argv)
         pcl::PCDWriter pcd_writer;
         cout << "current scan saved to /PCD/" << file_name<<endl;
         pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
+    }
+
+    if(save_pose){
+      out_pose.close();
+    }
+    if(save_odometry){
+      out_odometry.close();
     }
 
     fout_out.close();

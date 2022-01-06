@@ -3,6 +3,11 @@ common:
     imu_topic:  "/gps/imu"
     time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
     
+calibration:
+    pose_topic: "/gps/pose"  # Save pose for transformation between map and ecef
+    save_pose: true
+    save_odometry: true
+
 preprocess:
     lidar_type: 4                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
     scan_line: 80
