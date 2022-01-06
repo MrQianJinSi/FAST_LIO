@@ -1,7 +1,93 @@
 #include "preprocess.h"
 
+#include <map>
+
 #define RETURN0     0x00
 #define RETURN0AND1 0x10
+
+const double RS80_FIRE_PERIOD = 55.552;
+const std::map <int, double> RS80_FIRE_SEQ = {
+    {1, 0},
+    {2, 0},
+    {3, 0},
+    {4, 3.326},
+    {5, 3.326},
+    {6, 6.472},
+    {7, 6.472},
+    {8, 6.472},
+    {9, 6.472},
+    {10, 9.708},
+    {11, 9.708},
+    {12, 9.708},
+    {13, 12.944},
+    {14, 12.944},
+    {15, 12.944},
+    {16, 16.18},
+    {17, 16.18},
+    {18, 16.18},
+    {19, 19.416},
+    {20, 19.416},
+    {21, 19.416},
+    {22, 22.652},
+    {23, 22.652},
+    {24, 25.888},
+    {25, 25.888},
+    {26, 29.124},
+    {27, 29.124},
+    {28, 32.36},
+    {29, 32.36},
+    {30, 35.596},
+    {31, 35.596},
+    {32, 38.832},
+    {33, 38.832},
+    {34, 42.068},
+    {35, 42.068},
+    {36, 45.068},
+    {37, 45.068},
+    {38, 48.54},
+    {39, 48.54},
+    {40, 48.54},
+    {41, 0},
+    {42, 0},
+    {43, 0},
+    {44, 3.326},
+    {45, 3.326},
+    {46, 6.472},
+    {47, 6.472},
+    {48, 6.472},
+    {49, 6.472},
+    {50, 9.708},
+    {51, 9.708},
+    {52, 9.708},
+    {53, 12.944},
+    {54, 12.944},
+    {55, 12.944},
+    {56, 16.18},
+    {57, 16.18},
+    {58, 16.18},
+    {59, 19.416},
+    {60, 19.416},
+    {61, 19.416},
+    {62, 22.652},
+    {63, 22.652},
+    {64, 25.888},
+    {65, 25.888},
+    {66, 29.124},
+    {67, 29.124},
+    {68, 32.36},
+    {69, 32.36},
+    {70, 35.596},
+    {71, 35.596},
+    {72, 38.832},
+    {73, 38.832},
+    {74, 42.068},
+    {75, 42.068},
+    {76, 45.068},
+    {77, 45.068},
+    {78, 48.54},
+    {79, 48.54},
+    {80, 48.54}
+};
 
 Preprocess::Preprocess()
   :feature_enabled(0), lidar_type(AVIA), blind(0.01), point_filter_num(1)
@@ -58,6 +144,9 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
   case VELO16:
     velodyne_handler(msg);
     break;
+
+  case RS80:
+    rs_handler(msg);
   
   default:
     printf("Error LiDAR Type");
@@ -257,6 +346,113 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
   // pub_func(pl_surf, pub_full, msg->header.stamp);
   // pub_func(pl_surf, pub_corn, msg->header.stamp);
 }
+
+void Preprocess::rs_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
+{
+    pl_surf.clear();
+    pl_corn.clear();
+    pl_full.clear();
+
+    pcl::PointCloud<velodyne_ros::Point> pl_orig;
+    pcl::fromROSMsg(*msg, pl_orig);
+    int plsize = pl_orig.points.size();
+    if (plsize == 0) return;
+    pl_surf.reserve(plsize);
+
+    if (pl_orig.points[plsize - 1].time > 0)
+    {
+      given_offset_time = true;
+    }
+    else
+    {
+      given_offset_time = false;
+    }
+
+    if(feature_enabled)
+    {
+      for (int i = 0; i < N_SCANS; i++)
+      {
+        pl_buff[i].clear();
+        pl_buff[i].reserve(plsize);
+      }
+      
+      for (int i = 0; i < plsize; i++)
+      {
+        PointType added_pt;
+        added_pt.normal_x = 0;
+        added_pt.normal_y = 0;
+        added_pt.normal_z = 0;
+        added_pt.x = pl_orig.points[i].x;
+        added_pt.y = pl_orig.points[i].y;
+        added_pt.z = pl_orig.points[i].z;
+        added_pt.intensity = pl_orig.points[i].intensity;
+        added_pt.curvature = pl_orig.points[i].time / 1000.0; // units: ms
+
+        int scan_line =  (i % 80) + 1;
+        if (!given_offset_time)
+        {
+          int echo_index = i / 80;
+          added_pt.curvature =  (echo_index * RS80_FIRE_PERIOD + RS80_FIRE_SEQ.at(scan_line)) / 1000.0;
+        }
+
+        pl_buff[scan_line].points.push_back(added_pt);
+      }
+
+      for (int j = 0; j < N_SCANS; j++)
+      {
+        PointCloudXYZI &pl = pl_buff[j];
+        int linesize = pl.size();
+        if (linesize < 2) continue;
+        vector<orgtype> &types = typess[j];
+        types.clear();
+        types.resize(linesize);
+        linesize--;
+        for (uint i = 0; i < linesize; i++)
+        {
+          types[i].range = sqrt(pl[i].x * pl[i].x + pl[i].y * pl[i].y);
+          vx = pl[i].x - pl[i + 1].x;
+          vy = pl[i].y - pl[i + 1].y;
+          vz = pl[i].z - pl[i + 1].z;
+          types[i].dista = vx * vx + vy * vy + vz * vz;
+        }
+        types[linesize].range = sqrt(pl[linesize].x * pl[linesize].x + pl[linesize].y * pl[linesize].y);
+        give_feature(pl, types);
+      }
+    }
+    else
+    {
+      for (int i = 0; i < plsize; i++)
+      {
+        PointType added_pt;
+        
+        added_pt.normal_x = 0;
+        added_pt.normal_y = 0;
+        added_pt.normal_z = 0;
+        added_pt.x = pl_orig.points[i].x;
+        added_pt.y = pl_orig.points[i].y;
+        added_pt.z = pl_orig.points[i].z;
+        added_pt.intensity = pl_orig.points[i].intensity;
+        added_pt.curvature = pl_orig.points[i].time / 1000.0;  // curvature unit: ms
+
+        if (!given_offset_time)
+        {
+          int scan_line = (i % 80) + 1;
+          int echo_index = i / 80;
+          added_pt.curvature =  (echo_index * RS80_FIRE_PERIOD + RS80_FIRE_SEQ.at(scan_line)) / 1000.0;
+          // std::cout << "point index = " << i << ", scan_line = " << scan_line << ", echo_index = " << echo_index << ", fire_time = " << added_pt.curvature << std::endl;
+        }
+
+        if (i % point_filter_num == 0)
+        {
+          if(added_pt.x*added_pt.x+added_pt.y*added_pt.y+added_pt.z*added_pt.z > (blind * blind))
+          {
+            pl_surf.points.push_back(added_pt);
+          }
+        }
+      }
+    }
+}
+
 
 void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
 {
