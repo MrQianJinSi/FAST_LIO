@@ -147,6 +147,7 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
 
   case RS80:
     rs_handler(msg);
+    break;
   
   default:
     printf("Error LiDAR Type");
